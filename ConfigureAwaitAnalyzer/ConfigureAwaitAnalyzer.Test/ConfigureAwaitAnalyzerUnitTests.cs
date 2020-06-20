@@ -70,7 +70,7 @@ namespace N
 }
 ";
 
-        var expected = new DiagnosticResult
+            var expected = new DiagnosticResult
             {
                 Id = "ConfigureAwait",
                 Message = "Await of Task does not use ConfigureAwait",
@@ -82,6 +82,27 @@ namespace N
             };
 
             VerifyCSharpDiagnostic(test, expected);
+
+            var afterFix = @"
+using System.Threading.Tasks;
+
+namespace N
+{
+    class C
+    {
+        async Task M()
+        {
+            await N().ConfigureAwait(false);
+        }
+
+        Task N()
+        {
+            return Task.CompletedTask;
+        }
+    }
+}
+";
+            VerifyCSharpFix(test, afterFix);
         }
 
         [TestMethod]
@@ -145,6 +166,28 @@ namespace N
             };
 
             VerifyCSharpDiagnostic(test, expected);
+
+            var afterFix = @"
+using System.Threading.Tasks;
+
+namespace N
+{
+    class C
+    {
+        async Task<string> M()
+        {
+            return await N().ConfigureAwait(false);
+        }
+
+        Task<string> N()
+        {
+            return Task.FromResult(""foo"");
+        }
+    }
+}
+";
+
+            VerifyCSharpFix(test, afterFix);
         }
 
         [TestMethod]
@@ -208,6 +251,28 @@ namespace N
             };
 
             VerifyCSharpDiagnostic(test, expected);
+
+            var afterFix = @"
+using System.Threading.Tasks;
+
+namespace N
+{
+    class C
+    {
+        async Task<string> M()
+        {
+            return await N().ConfigureAwait(false);
+        }
+
+        async ValueTask<string> N()
+        {
+            return string.Empty;
+        }
+    }
+}
+";
+
+            VerifyCSharpFix(test, afterFix);
         }
 
         protected override CodeFixProvider GetCSharpCodeFixProvider()

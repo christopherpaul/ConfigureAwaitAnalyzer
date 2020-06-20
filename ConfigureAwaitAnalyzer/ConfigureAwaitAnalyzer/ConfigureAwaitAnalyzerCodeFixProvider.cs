@@ -18,7 +18,7 @@ namespace ConfigureAwaitAnalyzer
     [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(ConfigureAwaitAnalyzerCodeFixProvider)), Shared]
     public class ConfigureAwaitAnalyzerCodeFixProvider : CodeFixProvider
     {
-        private const string cTitle = "Make uppercase";
+        private const string cTitle = "Add ConfigureAwait(false)";
 
         public sealed override ImmutableArray<string> FixableDiagnosticIds
         {
@@ -35,38 +35,48 @@ namespace ConfigureAwaitAnalyzer
         {
             var root = await context.Document.GetSyntaxRootAsync(context.CancellationToken).ConfigureAwait(false);
 
-            // TODO: Replace the following code with your own analysis, generating a CodeAction for each fix to suggest
             var diagnostic = context.Diagnostics.First();
             var diagnosticSpan = diagnostic.Location.SourceSpan;
 
-            // Find the type declaration identified by the diagnostic.
-            var declaration = root.FindToken(diagnosticSpan.Start).Parent.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().First();
+            // Find the await syntax identified by the diagnostic.
+            var awaitSyntax = root.FindToken(diagnosticSpan.Start).Parent.AncestorsAndSelf().OfType<AwaitExpressionSyntax>().First();
 
             // Register a code action that will invoke the fix.
             context.RegisterCodeFix(
                 CodeAction.Create(
                     title: cTitle,
-                    createChangedSolution: c => MakeUppercaseAsync(context.Document, declaration, c),
+                    createChangedSolution: c => AddConfigureAwaitAsync(context.Document, awaitSyntax, c),
                     equivalenceKey: cTitle),
                 diagnostic);
         }
 
-        private async Task<Solution> MakeUppercaseAsync(Document document, TypeDeclarationSyntax typeDecl, CancellationToken cancellationToken)
+        private async Task<Solution> AddConfigureAwaitAsync(Document document, AwaitExpressionSyntax awaitSyntax, CancellationToken cancellationToken)
         {
-            // Compute new uppercase name.
-            var identifierToken = typeDecl.Identifier;
-            var newName = identifierToken.Text.ToUpperInvariant();
+            // Add .ConfigureAwait(false) to the operand of await
+            var originalAwaitedExpression = awaitSyntax.Expression;
+            var replacementAwaitedExpression =
+                SyntaxFactory.InvocationExpression(
+                    SyntaxFactory.MemberAccessExpression(
+                        SyntaxKind.SimpleMemberAccessExpression,
+                        originalAwaitedExpression,
+                        SyntaxFactory.IdentifierName("ConfigureAwait")))
+                .WithArgumentList(
+                    SyntaxFactory.ArgumentList(
+                        SyntaxFactory.SingletonSeparatedList(
+                            SyntaxFactory.Argument(
+                                SyntaxFactory.LiteralExpression(SyntaxKind.FalseLiteralExpression)))));
 
-            // Get the symbol representing the type to be renamed.
-            var semanticModel = await document.GetSemanticModelAsync(cancellationToken);
-            var typeSymbol = semanticModel.GetDeclaredSymbol(typeDecl, cancellationToken);
+            // Replace the original operand with the new one
+            var replacementAwaitSyntax = awaitSyntax.WithExpression(replacementAwaitedExpression);
 
-            // Produce a new solution that has all references to that type renamed, including the declaration.
+            // Replace the await in the syntax tree
+            var root = await document.GetSyntaxRootAsync(cancellationToken);
+            var updatedRoot = root.ReplaceNode(awaitSyntax, replacementAwaitSyntax);
+
+            // Replace the syntax tree in the document
             var originalSolution = document.Project.Solution;
-            var optionSet = originalSolution.Workspace.Options;
-            var newSolution = await Renamer.RenameSymbolAsync(document.Project.Solution, typeSymbol, newName, optionSet, cancellationToken).ConfigureAwait(false);
+            var newSolution = originalSolution.WithDocumentSyntaxRoot(document.Id, updatedRoot);
 
-            // Return the new solution with the now-uppercase type name.
             return newSolution;
         }
     }
